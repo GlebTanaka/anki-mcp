@@ -1,0 +1,28 @@
+# Installed dependencies and downloaded executables
+.venv/
+.tools/
+# Python and macOS generated files
+__pycache__/
+*.pyc
+.DS_Store
+# Machine/account-specific profiles and runtime output
+/tunnel-profiles/
+.tunnel-health.url
+*.log
+# Credentials must never be committed
+.env
+.env.*
+!.env.example
+/secrets/
+*.key
+*.pem
+# Anki collections and exports are separate backups
+*.anki2
+*.anki21
+*.apkg
+*.colpkg
+
+# Local Anki and tunnel settings
+/config.local.json
+/tunnel.local.json
+*.mp3
