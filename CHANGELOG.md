@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added a proposed Claude Code integration to the roadmap, with setup, safety
+  and live-test criteria; compatibility is not yet verified.
+
 - Completed a fresh project-environment installation and 14 passing unit tests.
 - Verified local preview, cancellation, approved addition and duplicate rejection.
 - Verified read-only tools from a fresh Codex chat and live plugin calls through
