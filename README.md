@@ -4,11 +4,12 @@ A small local Python MCP server for previewing and adding Anki notes through
 Codex or a ChatGPT custom plugin. Additions require a native macOS confirmation
 dialog, use a single configured deck, and check for duplicates.
 
-This is a generic development copy of a working personal prototype, prepared
-for private GitHub collaboration. It has not been released publicly or migrated
-into an existing installation. The refactored
-configuration and launcher have unit tests; live tunnel testing of this version
-is still pending. This project is licensed under the [MIT License](LICENSE).
+This is an MIT-licensed prototype with local and live integration tests on
+macOS. The generic configuration has been tested with Anki, Codex Desktop
+(read-only tools), and a ChatGPT custom plugin through a Secure MCP Tunnel,
+including a human-approved addition and duplicate rejection.
+
+See [TESTING.md](TESTING.md) for the verified scope and remaining limitations.
 
 ## Architecture
 
@@ -57,6 +58,20 @@ or fallback destination is provided. The tool caller cannot change the deck.
 .venv/bin/python -m unittest -v
 .venv/bin/python smoke_test.py
 ```
+
+Use a custom sentence without editing the script:
+
+```sh
+.venv/bin/python smoke_test.py \
+  --front '朝ご飯を食べた後で、台所を片付けます。' \
+  --back '<b>読み</b><br>あさごはんをたべたあとで、だいどころをかたづけます。<br><b>意味</b><br>朝食の後、台所をきれいにします。'
+```
+
+Supply both fields together. First run without `--add` and check `can_add`.
+Then repeat with `--add`, click Cancel, and run read-only again: the note should
+still be eligible. Repeat with `--add` and approve, then run read-only again:
+it should be rejected as a duplicate. Use a sentence not already in Anki.
+Each invocation creates a fresh preview; no preview IDs need to be copied.
 
 The smoke test connects to real Anki but is read-only by default.
 `smoke_test.py --add` requests approval for a real test note. If AnkiConnect
@@ -153,6 +168,7 @@ Anki open and Terminal running; someone must be at the Mac for additions.
 | `requirements*.txt` | Direct dependency and frozen environment versions |
 | `MIGRATION.md` | Future migration and rollback checklist |
 | `IDEAS.md`, `CHANGELOG.md` | Planned work and delivered changes |
+| `TESTING.md` | Tested environments, observed results and remaining limits |
 
 Git excludes local settings/profiles, keys, logs, installed dependencies,
 downloaded executables and generated media. Review staged content before each
@@ -169,9 +185,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for safe development and test practices.
 Keep installation-specific notes in ignored `local-notes/` or `*.local.md` files.
 The tracked ideas log and migration guide are generic and useful to contributors.
 
-Before a public release: validate a clean installation, test
-the refactored server through both live clients, and repeat the content/history
-review. A private remote is a source backup, not a backup of Anki or account settings.
+Before publishing future changes, review staged files and Git history for
+credentials or personal configuration and rerun the relevant tests. This
+repository backs up source code, not Anki collections or account settings.
 
 ## License
 

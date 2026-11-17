@@ -1,7 +1,7 @@
 # Contributing
 
 This project is a prototype licensed under the [MIT License](LICENSE).
-Public release remains pending.
+See TESTING.md for verified behavior and the limits of current testing.
 
 ## Development
 

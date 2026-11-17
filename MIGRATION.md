@@ -11,7 +11,8 @@ until this version has been tested with its own configuration.
    Keep `Front`, `Back` fields; no card migration is needed because the data
    remains in Anki. Unit tests must pass before live checks.
 4. Run the read-only smoke test against open Anki, then deliberately test an
-   approved addition. This copy has not yet undergone those live checks.
+   approved addition. These checks passed in the documented test environment;
+   repeat them for your own installation before switching clients.
 5. Record the old Codex launch arguments and replace them with this project's
    interpreter/script paths. Use a fresh chat, verify tools and the destination.
 6. Stop the existing tunnel before reusing its ID. Install the official client

@@ -17,12 +17,15 @@ references; add media support deliberately rather than removing safeguards.
 ## Portability and migration — partly prepared
 
 Local JSON settings and runtime-generated paths remove personal constants from
-the shared source. A full live migration remains future work; use MIGRATION.md.
+the shared source. The generic tunnel has passed live checks. Consolidating
+existing client registrations and retiring an older installation are separate
+optional steps; use MIGRATION.md.
 
-## Public release — pending
+## Further release validation — proposed
 
-MIT license selected. Test installation in a clean environment, review source and
-Git history for secrets/personal information, and verify both live client paths.
-Private GitHub setup is the current sharing step. Public release remains pending.
+MIT licensing, a fresh environment install, 14 unit tests, Codex read-only calls
+and confirmed tunnel additions are complete. Broaden coverage to additional
+Python/macOS versions, a clean machine/account, and Codex-specific write calls.
+Repeat source/history review before future publications.
 
 Record future proposals here; record delivered updates in CHANGELOG.md.
