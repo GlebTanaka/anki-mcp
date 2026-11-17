@@ -1,6 +1,7 @@
 # Contributing
 
-This project is a prototype. Public release and license selection are pending.
+This project is a prototype licensed under the [MIT License](LICENSE).
+Public release remains pending.
 
 ## Development
 

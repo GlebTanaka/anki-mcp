@@ -21,7 +21,7 @@ the shared source. A full live migration remains future work; use MIGRATION.md.
 
 ## Public release — pending
 
-Select a license, test installation in a clean environment, review source and
+MIT license selected. Test installation in a clean environment, review source and
 Git history for secrets/personal information, and verify both live client paths.
 Private GitHub setup is the current sharing step. Public release remains pending.
 

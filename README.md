@@ -8,8 +8,7 @@ This is a generic development copy of a working personal prototype, prepared
 for private GitHub collaboration. It has not been released publicly or migrated
 into an existing installation. The refactored
 configuration and launcher have unit tests; live tunnel testing of this version
-is still pending. No license has been selected yet; choose one before public
-release to clarify reuse rights.
+is still pending. This project is licensed under the [MIT License](LICENSE).
 
 ## Architecture
 
@@ -170,6 +169,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for safe development and test practices.
 Keep installation-specific notes in ignored `local-notes/` or `*.local.md` files.
 The tracked ideas log and migration guide are generic and useful to contributors.
 
-Before a public release: choose a license, validate a clean installation, test
+Before a public release: validate a clean installation, test
 the refactored server through both live clients, and repeat the content/history
 review. A private remote is a source backup, not a backup of Anki or account settings.
+
+## License
+
+Copyright (c) 2026 Gleb Tanaka. Distributed under the [MIT License](LICENSE).
+Third-party software, including Anki, AnkiConnect, Python dependencies and the
+downloaded tunnel client, remains subject to its respective licenses.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added the MIT License, copyright 2026 Gleb Tanaka, and updated license references.
+
 - Prepared private GitHub collaboration, contribution guidance and ignore rules
   for personal notes, editor settings and generated test/build output.
 - Reviewed all historical source blobs for common credentials and personal
