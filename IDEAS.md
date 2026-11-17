@@ -23,6 +23,6 @@ the shared source. A full live migration remains future work; use MIGRATION.md.
 
 Select a license, test installation in a clean environment, review source and
 Git history for secrets/personal information, and verify both live client paths.
-No GitHub remote or publication is part of this preparation.
+Private GitHub setup is the current sharing step. Public release remains pending.
 
 Record future proposals here; record delivered updates in CHANGELOG.md.

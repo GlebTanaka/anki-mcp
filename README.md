@@ -4,8 +4,9 @@ A small local Python MCP server for previewing and adding Anki notes through
 Codex or a ChatGPT custom plugin. Additions require a native macOS confirmation
 dialog, use a single configured deck, and check for duplicates.
 
-This is a generic development copy of a working personal prototype. It has not
-yet been published or migrated into an existing installation. The refactored
+This is a generic development copy of a working personal prototype, prepared
+for private GitHub collaboration. It has not been released publicly or migrated
+into an existing installation. The refactored
 configuration and launcher have unit tests; live tunnel testing of this version
 is still pending. No license has been selected yet; choose one before public
 release to clarify reuse rights.
@@ -162,3 +163,13 @@ repository and require separate backups. Card text/tool results are visible to
 the AI service; local execution is not a promise that content stays on the Mac.
 The approval guard does not protect against other programs on the Mac using
 AnkiConnect directly.
+
+## Collaboration and release status
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for safe development and test practices.
+Keep installation-specific notes in ignored `local-notes/` or `*.local.md` files.
+The tracked ideas log and migration guide are generic and useful to contributors.
+
+Before a public release: choose a license, validate a clean installation, test
+the refactored server through both live clients, and repeat the content/history
+review. A private remote is a source backup, not a backup of Anki or account settings.

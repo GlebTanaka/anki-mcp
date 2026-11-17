@@ -26,3 +26,16 @@ __pycache__/
 /config.local.json
 /tunnel.local.json
 *.mp3
+
+# Personal working notes and editor state
+/local-notes/
+*.local.md
+.idea/
+.vscode/
+# Local test/build output
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
