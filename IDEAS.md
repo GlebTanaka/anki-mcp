@@ -1,11 +1,11 @@
 # Ideas
 
-## Tunnel startup automation — proposed
+## Tunnel startup automation — implemented, live check pending
 
-Explore a one-click launcher and optional login-time startup. Choose secure
-persistent key storage first, for example macOS Keychain. Provide start/stop,
-health/readiness, duplicate-process prevention and explicit write mode. Retain
-local AnkiConnect and human approval. Decide separately whether to launch Anki.
+`tunnelctl.py` provides Keychain key storage, manual start/stop, readiness,
+duplicate prevention, explicit write mode and a one-click applet. Still open:
+a live run against the real tunnel and ChatGPT, optional login-time startup
+(LaunchAgent), and whether to launch Anki.
 
 ## Japanese TTS MP3 attachments — proposed
 

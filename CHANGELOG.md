@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Added `tunnelctl.py`: background Start/Stop, runtime key in the macOS
+  Keychain, `/readyz` readiness and status, a lock plus process scan that
+  prevents two clients for one tunnel ID, and an optional one-click applet.
+  Additions mode requires the desktop session; the Mac approval dialog is
+  unchanged. 13 new offline tests use a fake tunnel client.
+- The tunnel profile now launches the MCP server via `env -u
+  CONTROL_PLANE_API_KEY` so the runtime key is not inherited by the server or
+  its approval dialog. `start_tunnel.py` refuses to start beside another client.
+
 - Added a proposed Claude Code integration to the roadmap, with setup, safety
   and live-test criteria; compatibility is not yet verified.
 

@@ -152,9 +152,52 @@ labels can vary by account. See [OpenAI's tunnel guide](https://developers.opena
 
 The tunnel is outbound-only; no public AnkiConnect listener is needed. Its local
 health listener binds to loopback, with the URL written to `.tunnel-health.url`.
-The runtime key is kept in process memory/environment, not saved by the launcher.
-There is no Keychain integration or automatic startup yet. Keep the Mac awake,
-Anki open and Terminal running; someone must be at the Mac for additions.
+`start_tunnel.py` keeps the runtime key in process memory/environment only.
+Keep the Mac awake, Anki open and Terminal running; someone must be at the Mac
+for additions.
+
+### Background Start/Stop with the Keychain (`tunnelctl.py`)
+
+`tunnelctl.py` is an alternative to keeping a Terminal open. It runs the same
+tunnel client in the background, stores the runtime key in the login Keychain,
+and refuses to start a second client for the same tunnel.
+
+```sh
+.venv/bin/python tunnelctl.py key set               # hidden prompt; saved to Keychain
+.venv/bin/python tunnelctl.py start                 # read-only; waits for /readyz
+.venv/bin/python tunnelctl.py status                # state, readiness, key, Anki, conflicts
+.venv/bin/python tunnelctl.py start --enable-writes # only after `stop`; exposes add_card
+.venv/bin/python tunnelctl.py stop
+.venv/bin/python tunnelctl.py install-app           # builds build/Anki Tunnel.app
+```
+
+- **Key storage:** a generic-password item, service `anki-mcp-tunnel`, account =
+  tunnel ID. The key is passed to `security` on stdin, never on a command line,
+  and is never written to project files or logs. `key delete` removes it.
+  Items created by `security` can be read again by `security` without a
+  prompt, so this protects against files leaking, not against other programs
+  running as you.
+- **Readiness:** `start` runs `tunnel-client doctor`, launches the client, and
+  waits up to 45 s for `/readyz` on the loopback health port. `status --check`
+  exits 0 when ready, 2 when running but not ready, 1 when stopped.
+- **Duplicate prevention:** a lock serializes start/stop; a state file records
+  the PID and process start time so a reused PID is never signalled; and every
+  running `tunnel-client run` is checked, including foreground `start_tunnel.py`
+  clients and other installations. A client for the same or an unreadable tunnel
+  ID blocks the start. `start_tunnel.py` performs the same check.
+- **Approval dialog:** the MCP server is launched through `env -u
+  CONTROL_PLANE_API_KEY`, so it and its dialog never see the runtime key.
+  `--enable-writes` is refused outside the logged-in desktop session, where the
+  dialog could not appear. Additions still need a human click on "Add card".
+- **One-click:** `install-app` builds an AppleScript applet offering Status,
+  Start read-only, Start with card additions (with its own confirmation) and
+  Stop. Drag it to the Dock. It needs the key already in the Keychain. It reads
+  the project path from its bundle, so rebuild it after moving the project.
+
+Runtime state, the client log and the health URL live in the ignored
+`.tunnel-run/` folder (mode 0700). There is no login-time startup; start the
+tunnel manually. `stop` ends the client and its MCP server; an open approval
+dialog closes as Cancel.
 
 ## Files and version control
 
@@ -162,8 +205,9 @@ Anki open and Terminal running; someone must be at the Mac for additions.
 |---|---|
 | `anki_mcp.py` | MCP server, Anki client, validation, previews and approval |
 | `start_tunnel.py` | Portable profile generation, hidden key prompt and foreground launch |
+| `tunnelctl.py` | Background start/stop, Keychain key, readiness, duplicate guard, applet |
 | `smoke_test.py` | Live MCP client test, read-only unless `--add` |
-| `test_anki_mcp.py`, `test_start_tunnel.py` | Mocked safety/configuration/path tests |
+| `test_anki_mcp.py`, `test_start_tunnel.py`, `test_tunnelctl.py` | Mocked safety/configuration/path/lifecycle tests |
 | `config.example.json`, `tunnel.example.json` | Generic templates for ignored local settings |
 | `requirements*.txt` | Direct dependency and frozen environment versions |
 | `MIGRATION.md` | Future migration and rollback checklist |

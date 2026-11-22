@@ -44,6 +44,16 @@ Test each AI client separately. Reuse one tunnel ID only after stopping the
 previous client. Refresh ChatGPT tools after changing modes, and obtain new
 preview IDs after a server restart.
 
+## Tunnel controller (`tunnelctl.py`) — offline only
+
+27 unit tests pass, 13 of them new. The lifecycle tests run a fake tunnel client
+from a folder whose name has spaces and Japanese characters. They cover readiness,
+duplicate refusal, stop, stale or reused PIDs, failed preflight, early exit with
+key redaction, and refusing additions without a desktop session. A real
+Keychain round trip used a throwaway item that was then deleted. The applet's
+path handling was run headlessly. Not yet run against the real tunnel client,
+OpenAI control plane or ChatGPT, including the `env -u` launch change.
+
 ## Limitations
 
 This is a prototype, not a claim of universal compatibility. The fresh install
