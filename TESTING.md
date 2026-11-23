@@ -44,15 +44,33 @@ Test each AI client separately. Reuse one tunnel ID only after stopping the
 previous client. Refresh ChatGPT tools after changing modes, and obtain new
 preview IDs after a server restart.
 
-## Tunnel controller (`tunnelctl.py`) — offline only
+## Tunnel controller (`tunnelctl.py`) — live check 2026-11-23
+
+Run from a separate worktree on Apple Silicon macOS with tunnel-client v0.0.21,
+the existing tunnel and ChatGPT plugin. No other client was running.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Unit tests in a fresh worktree environment | 27 passed | User-supplied output |
+| `key set`, then `status` | Key stored in Keychain; Anki reachable | User-supplied output |
+| `start` (read-only) and `start --enable-writes` after `stop` | Ready within the timeout | User-supplied output |
+| Runtime key in the MCP server's environment | Absent; present only in the tunnel client | Direct `ps -E` check by name, value never printed |
+| Single client for the tunnel during the run | One `tunnel-client run` process | Direct process check |
+| ChatGPT plugin with additions enabled | Works, including human-approved additions | User report |
+| One-click applet Status | Showed ready, mode, key, Anki and session state | User screenshot |
+
+Not separately confirmed live: refusal of a second `start` while running, and
+Stop from the applet. Both are covered by the offline tests, with Stop also
+exercised through the same `do shell script` path using a fake client.
+
+### Offline coverage
 
 27 unit tests pass, 13 of them new. The lifecycle tests run a fake tunnel client
 from a folder whose name has spaces and Japanese characters. They cover readiness,
 duplicate refusal, stop, stale or reused PIDs, failed preflight, early exit with
 key redaction, and refusing additions without a desktop session. A real
 Keychain round trip used a throwaway item that was then deleted. The applet's
-path handling was run headlessly. Not yet run against the real tunnel client,
-OpenAI control plane or ChatGPT, including the `env -u` launch change.
+path handling was run headlessly.
 
 ## Limitations
 

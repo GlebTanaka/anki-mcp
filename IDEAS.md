@@ -1,11 +1,11 @@
 # Ideas
 
-## Tunnel startup automation — implemented, live check pending
+## Tunnel startup automation — implemented and live-checked
 
 `tunnelctl.py` provides Keychain key storage, manual start/stop, readiness,
-duplicate prevention, explicit write mode and a one-click applet. Still open:
-a live run against the real tunnel and ChatGPT, optional login-time startup
-(LaunchAgent), and whether to launch Anki.
+duplicate prevention, explicit write mode and a one-click applet; it passed a
+live run with ChatGPT (see TESTING.md). Still open: optional login-time startup
+(LaunchAgent) and whether to launch Anki.
 
 ## Japanese TTS MP3 attachments — proposed
 

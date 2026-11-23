@@ -6,7 +6,8 @@
   Keychain, `/readyz` readiness and status, a lock plus process scan that
   prevents two clients for one tunnel ID, and an optional one-click applet.
   Additions mode requires the desktop session; the Mac approval dialog is
-  unchanged. 13 new offline tests use a fake tunnel client.
+  unchanged. 13 new offline tests use a fake tunnel client; a live run with
+  the real tunnel client and ChatGPT passed, including approved additions.
 - The tunnel profile now launches the MCP server via `env -u
   CONTROL_PLANE_API_KEY` so the runtime key is not inherited by the server or
   its approval dialog. `start_tunnel.py` refuses to start beside another client.
