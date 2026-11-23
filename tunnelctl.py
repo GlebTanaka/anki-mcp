@@ -14,6 +14,7 @@ anki_mcp.py opens; nothing here can approve, bypass or suppress that dialog.
 """
 import argparse
 import contextlib
+import ctypes
 import fcntl
 import getpass
 import ipaddress
@@ -40,6 +41,9 @@ SECURITY = '/usr/bin/security'
 KEY_RE = re.compile(r'[A-Za-z0-9_\-]{20,512}')
 NOT_FOUND = 44  # security(1) exit status for a missing item
 APP_NAME = 'Anki Tunnel.app'
+# Shared by every checkout and both launchers, so locks are per user and per
+# tunnel ID rather than per project folder.
+LOCK_DIR = Path.home() / 'Library/Application Support/anki-mcp/locks'
 
 
 class TunnelError(Exception):
@@ -93,13 +97,51 @@ def ps(args):
     return result.stdout if result.returncode == 0 else ''
 
 
+def process_argv(pid):
+    """Exact argv of a process via sysctl KERN_PROCARGS2, or None if unreadable.
+
+    ps joins arguments with spaces, which makes paths ambiguous; this does not.
+    """
+    libc = ctypes.CDLL('/usr/lib/libc.dylib', use_errno=True)
+    argmax, size = ctypes.c_int(0), ctypes.c_size_t(ctypes.sizeof(ctypes.c_int))
+    if libc.sysctl((ctypes.c_int * 2)(1, 8), 2, ctypes.byref(argmax),  # KERN_ARGMAX
+                   ctypes.byref(size), None, 0):
+        return None
+    buf = ctypes.create_string_buffer(argmax.value)
+    size = ctypes.c_size_t(argmax.value)
+    if libc.sysctl((ctypes.c_int * 3)(1, 49, pid), 3, buf,  # KERN_PROCARGS2
+                   ctypes.byref(size), None, 0):
+        return None
+    data = buf.raw[:size.value]
+    try:
+        argc = int.from_bytes(data[:4], 'little')
+        pos = data.index(b'\0', 4)          # end of the executable path
+        while data[pos] == 0:                # padding before argv[0]
+            pos += 1
+        argv = []
+        for _ in range(argc):
+            end = data.index(b'\0', pos)
+            argv.append(data[pos:end].decode('utf-8', 'replace'))
+            pos = end + 1
+    except (ValueError, IndexError):
+        return None
+    return argv
+
+
 def list_processes():
+    """(pid, argv) for processes that mention tunnel-client; argv None if unreadable.
+
+    Raises TunnelError when the process table cannot be read, so callers fail
+    closed instead of concluding that nothing is running.
+    """
     out = ps(['-axo', 'pid=,command='])
+    if not out.strip():
+        raise TunnelError('Cannot inspect running processes; refusing to start')
     procs = []
     for line in out.splitlines():
         pid, _, command = line.strip().partition(' ')
-        if pid.isdigit():
-            procs.append((int(pid), command.strip()))
+        if pid.isdigit() and 'tunnel-client' in command and int(pid) != os.getpid():
+            procs.append((int(pid), process_argv(int(pid))))
     return procs
 
 
@@ -142,20 +184,63 @@ def loopback_get(url, timeout=2):
         return None
 
 
-def tunnel_ids(text):
-    # 'tunnel_id' is the YAML key name, not an ID.
-    return set(re.findall(r'tunnel_[A-Za-z0-9]+', text)) - {'tunnel_id'}
+ID_RE = re.compile(r'tunnel_[A-Za-z0-9]+')
 
 
-def config_path_from(command):
-    match = re.search(r'--config[ =](.+?)(?= --|$)', command)
-    return Path(match.group(1)) if match else None
+def flag_value(args, name):
+    """Last value of --name X or --name=X in an argv list (flags override YAML)."""
+    value = None
+    for i, arg in enumerate(args):
+        if arg == name and i + 1 < len(args):
+            value = args[i + 1]
+        elif arg.startswith(name + '='):
+            value = arg[len(name) + 1:]
+    return value
+
+
+def config_tunnel_id(text):
+    """The control_plane tunnel_id in a JSON or simple YAML profile, else None."""
+    try:
+        data = json.loads(text)
+        value = data.get('control_plane', {}).get('tunnel_id')
+        return value if isinstance(value, str) and ID_RE.fullmatch(value) else None
+    except (ValueError, AttributeError):
+        pass
+    values = {m.group(1) for m in re.finditer(
+        r'^\s*tunnel_id\s*:\s*["\']?([^"\'\s#]+)', text, re.MULTILINE)}
+    if len(values) == 1:
+        value = values.pop()
+        return value if ID_RE.fullmatch(value) else None
+    return None
+
+
+def client_tunnel(argv):
+    """For a `tunnel-client run` argv: (True, tunnel ID or None if unknown).
+    For anything else: (False, None)."""
+    for i in (0, 1):  # direct executable, or an interpreter running it
+        if (len(argv) > i + 1 and os.path.basename(argv[i]) == 'tunnel-client'
+                and argv[i + 1] == 'run'):
+            args = argv[i + 2:]
+            break
+    else:
+        return False, None
+    explicit = flag_value(args, '--control-plane.tunnel-id')
+    if explicit is not None:
+        return True, explicit if ID_RE.fullmatch(explicit) else None
+    config = flag_value(args, '--config')
+    if config is None:
+        return True, None  # configured by environment: cannot tell
+    try:
+        return True, config_tunnel_id(Path(config).read_text(errors='replace'))
+    except OSError:
+        return True, None
 
 
 class Tunnel:
     def __init__(self, root, keychain=None, processes=list_processes, inspect=inspect_pid,
-                 is_gui=gui_session, ready_timeout=45, stop_timeout=10):
+                 is_gui=gui_session, ready_timeout=45, stop_timeout=10, lock_dir=LOCK_DIR):
         self.root = Path(root)
+        self.lock_dir = Path(lock_dir)
         self.keychain = keychain or Keychain()
         self.processes, self.inspect, self.is_gui = processes, inspect, is_gui
         self.ready_timeout, self.stop_timeout = ready_timeout, stop_timeout
@@ -169,19 +254,65 @@ class Tunnel:
 
     # -- bookkeeping ---------------------------------------------------------
 
+    def _lock_file(self, tunnel_id, kind):
+        check_tunnel_id(tunnel_id)
+        self.lock_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        return os.open(self.lock_dir / f'{tunnel_id}.{kind}.lock', os.O_RDWR | os.O_CREAT, 0o600)
+
     @contextlib.contextmanager
-    def locked(self):
-        """Serialize start/stop so two clicks cannot launch two clients."""
+    def locked(self, tunnel_id):
+        """Serialize start/stop/status probes for one tunnel across all checkouts."""
         self.run_dir.mkdir(mode=0o700, exist_ok=True)
-        fd = os.open(self.run_dir / 'lock', os.O_RDWR | os.O_CREAT, 0o600)
+        fd = self._lock_file(tunnel_id, 'control')
         try:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                raise TunnelError('Another start or stop is in progress') from None
+                raise TunnelError('Another start or stop for this tunnel is in progress') from None
             yield
         finally:
             os.close(fd)
+
+    def acquire_client_lock(self, tunnel_id, launcher, wait=3.0):
+        """Take the per-tunnel client lock and return its fd.
+
+        The launched tunnel client inherits this fd, so the lock is held for
+        exactly as long as a client for this tunnel runs, whichever folder or
+        launcher started it, and is released automatically when it exits.
+        """
+        fd = self._lock_file(tunnel_id, 'client')
+        deadline = time.monotonic() + wait  # lets a just-stopped client finish exiting
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    holder = os.pread(fd, 4096, 0).decode('utf-8', 'replace').strip()
+                    os.close(fd)
+                    raise TunnelError('A tunnel client for this tunnel is already running'
+                                      + (f' ({holder})' if holder else '')
+                                      + '; stop it first') from None
+                time.sleep(0.2)
+        self.record_holder(fd, os.getpid(), launcher)
+        return fd
+
+    def record_holder(self, fd, pid, launcher):
+        info = json.dumps({'pid': pid, 'launcher': launcher, 'folder': str(self.root)},
+                          ensure_ascii=False).encode('utf-8')
+        os.ftruncate(fd, 0)
+        os.pwrite(fd, info, 0)
+
+    def client_lock_held(self, tunnel_id):
+        """True if some client holds the lock. Call only under locked()."""
+        fd = self._lock_file(tunnel_id, 'client')
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return False
+        except BlockingIOError:
+            return True
+        finally:
+            os.close(fd)  # closing releases a lock we just took
 
     def read_state(self):
         try:
@@ -214,22 +345,25 @@ class Tunnel:
     # -- duplicate prevention -------------------------------------------------
 
     def other_clients(self, tunnel_id, exclude=()):
-        """Other `tunnel-client run` processes that use, or may use, this tunnel."""
+        """Other `tunnel-client run` processes that use, or may use, this tunnel.
+
+        A backstop for clients started without the shared lock (older copies,
+        other tools). Anything that cannot be identified counts as a conflict.
+        """
         found = []
-        for pid, command in self.processes():
-            if pid in exclude or pid == os.getpid():
+        for pid, argv in self.processes():
+            if pid in exclude:
                 continue
-            if not re.search(r'tunnel-client\s+run(\s|$)', command):
+            if argv is None:
+                found.append((pid, 'unreadable process'))
                 continue
-            ids = tunnel_ids(command)
-            config = config_path_from(command)
-            if not ids and config:
-                try:
-                    ids = tunnel_ids(config.read_text(errors='replace'))
-                except OSError:
-                    pass
-            if not ids or tunnel_id in ids:
-                found.append((pid, 'same tunnel' if ids else 'unknown tunnel'))
+            is_client, their_id = client_tunnel(argv)
+            if not is_client:
+                continue
+            if their_id is None:
+                found.append((pid, 'unknown tunnel'))
+            elif their_id == tunnel_id:
+                found.append((pid, 'same tunnel'))
         return found
 
     def ensure_no_other_client(self, tunnel_id, exclude=()):
@@ -291,41 +425,49 @@ class Tunnel:
         return '\n'.join(text.splitlines()[-lines:])
 
     def start(self, enable_writes=False, interactive=False):
-        with self.locked():
-            tunnel_id = self.preflight(enable_writes)
+        tunnel_id = self.preflight(enable_writes)
+        with self.locked(tunnel_id):
             stale = self.read_state()
             if stale and not self.alive(stale):
                 self.clear_state()
             self.ensure_no_other_client(tunnel_id)
-            key = self.obtain_key(tunnel_id, interactive)
-            env = dict(os.environ, **{KEY_ENV: key})
-            write_profile(self.profile, make_profile(self.root, tunnel_id, enable_writes))
-            if self.log_file.exists():
-                os.replace(self.log_file, self.log_file.with_suffix('.log.1'))
-            fd = os.open(self.log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-            with os.fdopen(fd, 'ab') as log:
-                doctor = subprocess.run([str(self.client), 'doctor', '--config', str(self.profile),
-                                         '--explain'], env=env, stdin=subprocess.DEVNULL,
-                                        stdout=log, stderr=subprocess.STDOUT, timeout=120)
-                if doctor.returncode:
-                    raise TunnelError('Preflight (tunnel-client doctor) failed; nothing started.\n'
-                                      + self.log_tail(redact=key))
-                self.health_file.unlink(missing_ok=True)
-                proc = subprocess.Popen(
-                    [str(self.client), 'run', '--config', str(self.profile),
-                     '--health.url-file', str(self.health_file)],
-                    env=env, cwd=self.root, stdin=subprocess.DEVNULL, stdout=log,
-                    stderr=subprocess.STDOUT, start_new_session=True)
-            del env
-            info = self.inspect(proc.pid)
-            mode = 'additions' if enable_writes else 'read-only'
-            self.write_state({'pid': proc.pid, 'started': info[1] if info else None,
-                              'mode': mode, 'tunnel_id': tunnel_id,
-                              'started_at': time.time()})
-            self._proc = proc
-            ready = self.wait_ready(proc, key)
-            del key
-            return {'pid': proc.pid, 'mode': mode, 'ready': ready}
+            lock_fd = self.acquire_client_lock(tunnel_id, 'tunnelctl.py')
+            try:
+                return self._launch(tunnel_id, enable_writes, interactive, lock_fd)
+            finally:
+                os.close(lock_fd)  # the client keeps its inherited copy
+
+    def _launch(self, tunnel_id, enable_writes, interactive, lock_fd):
+        key = self.obtain_key(tunnel_id, interactive)
+        env = dict(os.environ, **{KEY_ENV: key})
+        write_profile(self.profile, make_profile(self.root, tunnel_id, enable_writes))
+        if self.log_file.exists():
+            os.replace(self.log_file, self.log_file.with_suffix('.log.1'))
+        fd = os.open(self.log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, 'ab') as log:
+            doctor = subprocess.run([str(self.client), 'doctor', '--config', str(self.profile),
+                                     '--explain'], env=env, stdin=subprocess.DEVNULL,
+                                    stdout=log, stderr=subprocess.STDOUT, timeout=120)
+            if doctor.returncode:
+                raise TunnelError('Preflight (tunnel-client doctor) failed; nothing started.\n'
+                                  + self.log_tail(redact=key))
+            self.health_file.unlink(missing_ok=True)
+            proc = subprocess.Popen(
+                [str(self.client), 'run', '--config', str(self.profile),
+                 '--health.url-file', str(self.health_file)],
+                env=env, cwd=self.root, stdin=subprocess.DEVNULL, stdout=log,
+                stderr=subprocess.STDOUT, start_new_session=True, pass_fds=(lock_fd,))
+        del env
+        self.record_holder(lock_fd, proc.pid, 'tunnelctl.py')
+        info = self.inspect(proc.pid)
+        mode = 'additions' if enable_writes else 'read-only'
+        self.write_state({'pid': proc.pid, 'started': info[1] if info else None,
+                          'mode': mode, 'tunnel_id': tunnel_id,
+                          'started_at': time.time()})
+        self._proc = proc
+        ready = self.wait_ready(proc, key)
+        del key
+        return {'pid': proc.pid, 'mode': mode, 'ready': ready}
 
     def wait_ready(self, proc, key=None):
         deadline = time.monotonic() + self.ready_timeout
@@ -347,7 +489,15 @@ class Tunnel:
         return {'healthz': loopback_get(base + '/healthz'), 'readyz': loopback_get(base + '/readyz')}
 
     def stop(self):
-        with self.locked():
+        state = self.read_state()
+        try:
+            tunnel_id = (state or {}).get('tunnel_id') or load_tunnel_id(self.root)
+        except (OSError, ValueError, TypeError):
+            tunnel_id = None
+        if not tunnel_id:
+            self.clear_state()
+            return False
+        with self.locked(tunnel_id):
             state = self.read_state()
             if not state or not self.alive(state):
                 self.clear_state()
@@ -393,7 +543,15 @@ class Tunnel:
         result['gui_session'] = self.is_gui()
         result['anki_reachable'] = anki_reachable()
         exclude = {state['pid']} if result['running'] else set()
-        result['other_clients'] = [pid for pid, _ in self.other_clients(tunnel_id, exclude)] if tunnel_id else []
+        result['other_clients'], result['client_lock_held'] = [], None
+        if tunnel_id:
+            try:
+                result['other_clients'] = [pid for pid, _ in self.other_clients(tunnel_id, exclude)]
+            except TunnelError:
+                result['other_clients'] = None
+            with contextlib.suppress(TunnelError):
+                with self.locked(tunnel_id):
+                    result['client_lock_held'] = self.client_lock_held(tunnel_id)
         return result
 
 
@@ -419,6 +577,11 @@ def describe(status):
               f"Desktop session for approval dialogs: {yes[status['gui_session']]}"]
     if status['other_clients']:
         lines.append(f"Warning: other tunnel clients for this tunnel: {status['other_clients']}")
+    elif status['other_clients'] is None:
+        lines.append('Warning: could not inspect running processes')
+    if status['client_lock_held'] and not status['running']:
+        lines.append('Note: a tunnel client for this tunnel is running from another '
+                     'folder or launcher')
     if status['running'] and status['mode'] == 'additions':
         lines.append('Each card addition still requires clicking "Add card" on this Mac.')
     return '\n'.join(lines)

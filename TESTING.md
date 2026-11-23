@@ -72,6 +72,18 @@ key redaction, and refusing additions without a desktop session. A real
 Keychain round trip used a throwaway item that was then deleted. The applet's
 path handling was run headlessly.
 
+## Review fixes — offline, live check pending
+
+34 unit tests pass. New tests cover: a folder named like a tunnel ID, exact
+argument reading for paths with spaces and Unicode, failure to inspect
+processes, a second checkout blocked by the shared lock with a blind process
+scan, lock release when the client is killed, the lock surviving `exec` as in
+`start_tunnel.py`, rejected processing instructions/CDATA and invisible
+characters, dialog text that imitates labels, and previews while a dialog is
+open. The argument reader correctly identified a real running client's tunnel
+from its configuration. The changed dialog script compiles; the dialog itself
+and the lock with the real tunnel client still need a live run.
+
 ## Limitations
 
 This is a prototype, not a claim of universal compatibility. The fresh install

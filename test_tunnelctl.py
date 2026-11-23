@@ -8,11 +8,12 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from unittest.mock import patch
 
 import tunnelctl
-from tunnelctl import Keychain, Tunnel, TunnelError, config_path_from
+from tunnelctl import Keychain, Tunnel, TunnelError, client_tunnel
 
 TUNNEL = 'tunnel_test123'
 KEY = 'sk-test_' + 'x' * 30
@@ -66,9 +67,12 @@ def make_root(folder):
     return root
 
 
-def only_under(root):
-    """Process lister that ignores everything outside the test folder."""
-    return lambda: [(pid, cmd) for pid, cmd in tunnelctl.list_processes() if str(root) in cmd]
+def only_under(*roots):
+    """Process lister that ignores everything outside the test folders."""
+    def lister():
+        return [(pid, argv) for pid, argv in tunnelctl.list_processes()
+                if argv and any(str(root) in arg for root in roots for arg in argv)]
+    return lister
 
 
 class KeychainTests(unittest.TestCase):
@@ -95,32 +99,70 @@ class KeychainTests(unittest.TestCase):
 
 
 class ProcessTests(unittest.TestCase):
-    def test_config_path_with_spaces(self):
-        cmd = '/a b/tunnel-client run --config /x y/日本/managed.yaml --health.url-file /z'
-        self.assertEqual(config_path_from(cmd), Path('/x y/日本/managed.yaml'))
-
-    def test_other_clients_detects_same_and_unknown_tunnels(self):
+    def test_reads_exact_argv_of_a_process(self):
+        self.assertEqual(tunnelctl.process_argv(os.getpid())[1:], sys.orig_argv[1:])
         with tempfile.TemporaryDirectory() as folder:
-            same = Path(folder) / 'same.yaml'
-            same.write_text(f'tunnel_id: {TUNNEL}\n')
+            odd = Path(folder) / 'a dir --config x' / '日本語'
+            odd.mkdir(parents=True)
+            child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)',
+                                      str(odd), '--flag=two words'])
+            try:
+                deadline = time.monotonic() + 5
+                while tunnelctl.process_argv(child.pid) in (None, [sys.executable]):
+                    if time.monotonic() > deadline:
+                        break
+                self.assertEqual(tunnelctl.process_argv(child.pid)[-2:],
+                                 [str(odd), '--flag=two words'])
+            finally:
+                child.kill()
+                child.wait()
+
+    def test_client_tunnel_parsing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            # A folder named like a tunnel ID must not hide the real one.
+            base = Path(folder) / 'tunnel_unrelated' / 'with space'
+            base.mkdir(parents=True)
+            same = base / 'same.yaml'
+            same.write_text(json.dumps({'control_plane': {'tunnel_id': TUNNEL}}))
+            yaml = base / 'plain.yaml'
+            yaml.write_text(f'control_plane:\n  tunnel_id: "{TUNNEL}"\n')
+            client = str(base / 'tunnel-client')
+            cases = [
+                ([client, 'run', '--config', str(same)], (True, TUNNEL)),
+                ([client, 'run', f'--config={yaml}'], (True, TUNNEL)),
+                (['/usr/bin/python3', client, 'run', '--config', str(same)], (True, TUNNEL)),
+                ([client, 'run', '--config', str(same), '--control-plane.tunnel-id', 'tunnel_b'],
+                 (True, 'tunnel_b')),
+                ([client, 'run'], (True, None)),                       # set by environment
+                ([client, 'run', '--config', '/missing.yaml'], (True, None)),
+                ([client, 'doctor', '--config', str(same)], (False, None)),
+                (['zsh', '-c', f'{client} run --config {same}'], (False, None)),
+            ]
+            for argv, expected in cases:
+                self.assertEqual(client_tunnel(argv), expected, argv)
+            for text in ('tunnel_id: env:X', 'a:\n  tunnel_id: tunnel_a\nb:\n  tunnel_id: tunnel_b'):
+                self.assertIsNone(tunnelctl.config_tunnel_id(text))
+
+    def test_other_clients_fails_closed(self):
+        with tempfile.TemporaryDirectory() as folder:
             other = Path(folder) / 'other.yaml'
             other.write_text('tunnel_id: tunnel_someoneelse\n')
-            envref = Path(folder) / 'envref.yaml'
-            envref.write_text('tunnel_id: env:SOME_VAR\n')
-            procs = [(11, f'/x/tunnel-client run --config {same}'),
-                     (18, f'/x/tunnel-client run --config {envref}'),
-                     (12, f'/x/tunnel-client run --config {other}'),
-                     (13, '/x/tunnel-client run --config /missing.yaml'),
-                     (14, f'/x/tunnel-client doctor --config {same}'),
-                     (15, f'/x/tunnel-client run --control-plane.tunnel-id {TUNNEL}'),
-                     (16, 'vim tunnel-client.md'),
-                     (17, f"zsh -c cp .tools/tunnel-client/tunnel-client x; run {TUNNEL}")]
-            tunnel = Tunnel(folder, FakeKeychain(), processes=lambda: procs)
+            same = Path(folder) / 'tunnel_unrelated.yaml'
+            same.write_text(f'tunnel_id: {TUNNEL}\n')
+            procs = [(11, ['/x/tunnel-client', 'run', '--config', str(same)]),
+                     (12, ['/x/tunnel-client', 'run', '--config', str(other)]),
+                     (13, ['/x/tunnel-client', 'run', '--config', '/missing.yaml']),
+                     (14, None),                                   # argv unreadable
+                     (15, ['vim', 'tunnel-client.md'])]
+            tunnel = Tunnel(folder, FakeKeychain(), processes=lambda: procs, lock_dir=folder)
             self.assertEqual(tunnel.other_clients(TUNNEL),
-                             [(11, 'same tunnel'), (18, 'unknown tunnel'),
-                              (13, 'unknown tunnel'), (15, 'same tunnel')])
+                             [(11, 'same tunnel'), (13, 'unknown tunnel'),
+                              (14, 'unreadable process')])
             with self.assertRaises(TunnelError):
                 tunnel.ensure_no_other_client(TUNNEL)
+        with patch('tunnelctl.ps', return_value=''):
+            with self.assertRaisesRegex(TunnelError, 'Cannot inspect'):
+                tunnelctl.list_processes()
 
     def test_loopback_only(self):
         for url in ('http://example.com/readyz', 'https://127.0.0.1/readyz', 'file:///etc/passwd'):
@@ -132,15 +174,18 @@ class LifecycleTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = make_root(self.tmp.name)
         self.keychain = FakeKeychain()
+        self.lock_dir = Path(self.tmp.name) / 'locks'
         self.tunnel = self.new_tunnel()
 
     def tearDown(self):
-        self.tunnel.stop()
+        for tunnel in getattr(self, 'extra', []) + [self.tunnel]:
+            tunnel.stop()
         self.tmp.cleanup()
 
-    def new_tunnel(self, gui=True):
-        return Tunnel(self.root, self.keychain, processes=only_under(self.root),
-                      is_gui=lambda: gui, ready_timeout=10)
+    def new_tunnel(self, gui=True, root=None, processes=None):
+        return Tunnel(root or self.root, self.keychain,
+                      processes=processes or only_under(self.root),
+                      is_gui=lambda: gui, ready_timeout=10, lock_dir=self.lock_dir)
 
     def test_start_ready_duplicate_stop(self):
         result = self.tunnel.start()
@@ -205,9 +250,47 @@ class LifecycleTests(unittest.TestCase):
         self.assertTrue(self.tunnel.start()['ready'])
 
     def test_concurrent_start_is_serialized(self):
-        with self.tunnel.locked():
+        with self.tunnel.locked(TUNNEL):
             with self.assertRaisesRegex(TunnelError, 'in progress'):
                 self.new_tunnel().start()
+
+    def test_shared_lock_blocks_other_checkouts_without_process_scan(self):
+        other_root = make_root(Path(self.tmp.name) / 'second checkout')
+        self.assertTrue(self.tunnel.start()['ready'])
+        # Even with a process scan that sees nothing, the per-tunnel lock refuses.
+        blind = self.new_tunnel(root=other_root, processes=lambda: [])
+        self.extra = [blind]
+        with self.assertRaisesRegex(TunnelError, 'already running.*tunnelctl.py'):
+            blind.start()
+        status = blind.status()
+        self.assertFalse(status['running'])
+        self.assertTrue(status['client_lock_held'])
+        # The lock belongs to the client: if it dies, the lock goes with it.
+        os.killpg(self.tunnel.read_state()['pid'], 9)
+        self.tunnel._proc.wait()
+        self.assertTrue(blind.start()['ready'])
+
+    def test_lock_survives_exec_like_the_foreground_launcher(self):
+        code = textwrap.dedent(f"""
+            import os, sys
+            sys.path.insert(0, {str(Path(__file__).parent)!r})
+            from tunnelctl import Tunnel
+            fd = Tunnel({str(self.root)!r}, lock_dir={str(self.lock_dir)!r}).acquire_client_lock(
+                {TUNNEL!r}, 'start_tunnel.py')
+            os.set_inheritable(fd, True)
+            os.execv('/bin/sleep', ['sleep', '30'])
+        """)
+        child = subprocess.Popen([sys.executable, '-c', code])
+        try:
+            deadline = time.monotonic() + 10
+            while not self.tunnel.client_lock_held(TUNNEL):
+                self.assertLess(time.monotonic(), deadline)
+            with self.assertRaisesRegex(TunnelError, 'already running.*start_tunnel.py'):
+                self.new_tunnel(processes=lambda: []).start()
+        finally:
+            child.kill()
+            child.wait()
+        self.assertFalse(self.tunnel.client_lock_held(TUNNEL))
 
 
 class AppTests(unittest.TestCase):

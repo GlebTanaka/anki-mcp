@@ -70,11 +70,15 @@ def main():
         profile = make_profile(root, tunnel_id, args.enable_writes)
         if not client.is_file() or not (root / '.venv/bin/python').is_file():
             raise ValueError('Install the tunnel client and create .venv first')
-        Tunnel(root).ensure_no_other_client(tunnel_id)
+        if not sys.stdin.isatty():
+            raise ValueError('Run in your own interactive Terminal')
+        tunnel = Tunnel(root)
+        with tunnel.locked(tunnel_id):
+            tunnel.ensure_no_other_client(tunnel_id)
+            # Held across exec: the lock lives exactly as long as this client.
+            lock_fd = tunnel.acquire_client_lock(tunnel_id, 'start_tunnel.py')
     except (OSError, ValueError, TypeError, TunnelError) as exc:
         parser.error(str(exc))
-    if not sys.stdin.isatty():
-        parser.error('Run in your own interactive Terminal')
     config = root / 'tunnel-profiles' / 'generated.yaml'
     write_profile(config, profile)
     key = getpass.getpass('Paste tunnel runtime API key (hidden): ').strip()
@@ -87,6 +91,7 @@ def main():
         raise SystemExit('Preflight failed; tunnel not started. Do not share the key.')
     mode = 'confirmation-gated' if args.enable_writes else 'read-only'
     print(f'Starting {mode} tunnel. Keep Terminal open; Ctrl+C stops it.', flush=True)
+    os.set_inheritable(lock_fd, True)
     os.execve(str(client), [str(client), 'run', '--config', str(config),
                             '--health.url-file', str(root / '.tunnel-health.url')], env)
 

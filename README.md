@@ -112,14 +112,22 @@ sequenceDiagram
 
 Previews expire after ten minutes and are consumed on an add attempt. A new
 preview is needed after failure, cancellation or a restart. The dialog defaults
-to Cancel and expires after 45 seconds. Never automate its approval.
+to Cancel and expires after 45 seconds. Never automate its approval. Only one
+dialog is open at a time; previews keep working while it is open.
+
+In the dialog, the deck appears in the window title and the first line. Every
+line of card text starts with `│` (or `┆` where the server wrapped a long line),
+so text from the AI cannot pass itself off as a label or a destination.
 
 Duplicates use Anki's first-field/note-type rules across the collection, not
 semantic similarity. Anki's own add call also disallows duplicates. If a write
 times out, inspect Anki before retrying because the response may have been lost.
 
 Simple formatting and ruby HTML are allowed, without attributes, scripts,
-images or sound directives. Each field is limited to 1500 characters. The Mac
+images, sound directives, comments, processing instructions or CDATA. Invisible
+and direction-changing characters (bidi controls, zero-width marks, line
+separators) are rejected; this also rejects emoji built with zero-width joiners.
+Each field is limited to 1500 characters. The Mac
 dialog displays HTML source; keep content short enough to review completely.
 Added notes receive the `codex-anki` tag for compatibility with the prototype.
 Anki's templates and scheduling determine generated cards and review timing.
@@ -180,11 +188,16 @@ and refuses to start a second client for the same tunnel.
 - **Readiness:** `start` runs `tunnel-client doctor`, launches the client, and
   waits up to 45 s for `/readyz` on the loopback health port. `status --check`
   exits 0 when ready, 2 when running but not ready, 1 when stopped.
-- **Duplicate prevention:** a lock serializes start/stop; a state file records
-  the PID and process start time so a reused PID is never signalled; and every
-  running `tunnel-client run` is checked, including foreground `start_tunnel.py`
-  clients and other installations. A client for the same or an unreadable tunnel
-  ID blocks the start. `start_tunnel.py` performs the same check.
+- **Duplicate prevention:** one lock per user and tunnel ID, in
+  `~/Library/Application Support/anki-mcp/locks/`, shared by every checkout and
+  by both `tunnelctl.py` and `start_tunnel.py`. The running tunnel client
+  inherits the lock, so it is held exactly as long as a client for that tunnel
+  runs and is released automatically when the client exits or crashes. As a
+  backstop for clients started some other way, the exact arguments of every
+  running `tunnel-client run` are read and its configuration parsed; one using
+  the same tunnel, or one that cannot be identified, blocks the start, and so
+  does a failure to inspect processes. A state file records the PID and process
+  start time so a reused PID is never signalled.
 - **Approval dialog:** the MCP server is launched through `env -u
   CONTROL_PLANE_API_KEY`, so it and its dialog never see the runtime key.
   `--enable-writes` is refused outside the logged-in desktop session, where the
@@ -197,7 +210,9 @@ and refuses to start a second client for the same tunnel.
 Runtime state, the client log and the health URL live in the ignored
 `.tunnel-run/` folder (mode 0700). There is no login-time startup; start the
 tunnel manually. `stop` ends the client and its MCP server; an open approval
-dialog closes as Cancel.
+dialog closes as Cancel. `stop` only stops a tunnel started by `tunnelctl.py`
+from the same folder; `status` notes when another folder or launcher holds the
+tunnel.
 
 ## Files and version control
 

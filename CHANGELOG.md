@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Addressed review findings. Duplicate prevention now uses one per-user,
+  per-tunnel lock shared by all checkouts and both launchers and held by the
+  running client itself. The process scan reads exact arguments, parses the
+  configuration and fails closed when processes cannot be inspected or
+  identified.
+- HTML validation rejects processing instructions and CDATA. Cards with
+  invisible or direction-changing characters are rejected. The approval
+  dialog marks every line of card text and shows the deck in its title.
+- Previews no longer wait while an approval dialog is open; additions remain
+  one at a time, single-use and rechecked. 34 tests pass (7 new).
+
 - Added `tunnelctl.py`: background Start/Stop, runtime key in the macOS
   Keychain, `/readyz` readiness and status, a lock plus process scan that
   prevents two clients for one tunnel ID, and an optional one-click applet.

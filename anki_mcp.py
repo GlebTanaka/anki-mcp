@@ -7,6 +7,7 @@ import secrets
 import subprocess
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 from html.parser import HTMLParser
@@ -82,6 +83,12 @@ class SafeHTML(HTMLParser):
     def handle_decl(self, decl):
         raise ValueError("HTML declarations are not supported")
 
+    def handle_pi(self, data):
+        raise ValueError("HTML processing instructions are not supported")
+
+    def unknown_decl(self, data):
+        raise ValueError("CDATA and other HTML declarations are not supported")
+
 
 def validate(front, back):
     for value in (front, back):
@@ -89,22 +96,65 @@ def validate(front, back):
             raise ValueError("Front and Back must each contain 1–1500 characters")
         if any(ord(c) < 32 and c not in "\n\t" for c in value) or "[sound:" in value.lower():
             raise ValueError("Control characters and media are not supported")
+        # Invisible formatting (bidi overrides, zero-width marks, line/paragraph
+        # separators) could make the approval dialog show something misleading.
+        if any(unicodedata.category(c) in ("Cf", "Zl", "Zp", "Co", "Cn")
+               or (unicodedata.category(c) == "Cc" and c not in "\n\t") for c in value):
+            raise ValueError("Invisible or direction-changing characters are not supported")
         parser = SafeHTML()
         parser.feed(value)
         parser.close()
 
 
+CONTENT_MARK = "\u2502 "     # starts each line of card text; labels never do
+CONTINUED_MARK = "\u2506 "   # starts a line we wrapped ourselves
+WRAP_COLUMNS = 40            # wide (CJK) characters count as two columns
+
+
+def wrap(line, width=WRAP_COLUMNS):
+    """Hard-wrap so the dialog never wraps a line onto the unmarked margin."""
+    pieces, current, used = [], "", 0
+    for c in line.replace("\t", "    "):
+        w = 2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
+        if used + w > width:
+            pieces.append(current)
+            current, used = "", 0
+        current += c
+        used += w
+    return pieces + [current]
+
+
+def quoted(text):
+    out = []
+    for line in text.split("\n"):
+        first, *rest = wrap(line)
+        out += [CONTENT_MARK + first] + [CONTINUED_MARK + piece for piece in rest]
+    return "\n".join(out)
+
+
+def approval_text(note):
+    """Trusted labels at the left margin; card text always indented with a bar,
+    so card content cannot pass itself off as a label or as the destination."""
+    return (f"Add one note to deck \u201c{note['deckName']}\u201d "
+            f"(note type \u201c{note['modelName']}\u201d)?\n"
+            "Lines marked \u2502 are card text supplied by the AI "
+            "(\u2506 = wrapped for display).\n\n"
+            f"FRONT\n{quoted(note['fields']['Front'])}\n\n"
+            f"BACK (HTML source)\n{quoted(note['fields']['Back'])}")
+
+
 def confirm_on_mac(note):
     # Card content is an argv value, never interpolated into executable AppleScript.
-    text = (f"Add one Anki note?\nDeck: {note['deckName']}\nType: {note['modelName']}\n\n"
-            f"Front:\n{note['fields']['Front']}\n\nBack (HTML source):\n{note['fields']['Back']}")
+    # The deck also goes in the window title, which card text cannot reach.
+    text = approval_text(note)
+    title = f"Anki approval \u2014 deck: {note['deckName']}"
     script = '''on run argv
-set answer to display dialog (item 1 of argv) with title "Anki card approval" buttons {"Cancel", "Add card"} default button "Cancel" cancel button "Cancel" giving up after 45
+set answer to display dialog (item 1 of argv) with title (item 2 of argv) buttons {"Cancel", "Add card"} default button "Cancel" cancel button "Cancel" giving up after 45
 if gave up of answer then return "cancelled"
 return button returned of answer
 end run'''
     try:
-        result = subprocess.run(["/usr/bin/osascript", "-e", script, text],
+        result = subprocess.run(["/usr/bin/osascript", "-e", script, text, title],
                                 capture_output=True, text=True, timeout=50)
         return result.returncode == 0 and result.stdout.strip() == "Add card"
     except (OSError, subprocess.TimeoutExpired):
@@ -116,7 +166,8 @@ class Cards:
         self.settings = settings
         self.api, self.confirm, self.clock = api, confirm, clock
         self.pending = {}
-        self.lock = threading.Lock()
+        self.lock = threading.Lock()        # short: pending-preview bookkeeping
+        self.add_lock = threading.Lock()    # one addition (and one dialog) at a time
 
     def list_decks(self):
         return self.api("deckNames")
@@ -153,8 +204,12 @@ class Cards:
                     "status": "ready_for_review" if can_add else "duplicate_or_invalid"}
 
     def add_card(self, preview_id):
-        with self.lock:
-            item = self.pending.pop(preview_id, None)
+        # Previews keep working while the dialog is open: only add_lock is held
+        # across confirmation. The token is popped under the short lock, so it
+        # stays single-use, and every check below is repeated after the dialog.
+        with self.add_lock:
+            with self.lock:
+                item = self.pending.pop(preview_id, None)
             if item is None or item[0] <= self.clock():
                 raise ValueError("Unknown, consumed, or expired preview. Preview again.")
             _, note = item

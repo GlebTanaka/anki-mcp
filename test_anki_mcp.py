@@ -1,7 +1,9 @@
 import asyncio
+import threading
 import unittest
 from unittest.mock import Mock, patch
-from anki_mcp import Cards, Settings, load_settings, build_server, confirm_on_mac, validate
+from anki_mcp import (Cards, Settings, approval_text, build_server, confirm_on_mac,
+                      load_settings, validate)
 
 
 DECK = "Example deck"
@@ -108,6 +110,57 @@ class CardTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate(value, "back")
         validate("日本語", "<ruby>食器<rt>しょっき</rt></ruby><br><b>意味</b>")
+
+    def test_html_rejects_processing_instructions_and_cdata(self):
+        for value in ("<?php echo 1 ?>", "<?xml version='1.0'?>", "<![CDATA[x]]>", "<!DOCTYPE html>"):
+            with self.assertRaises(ValueError):
+                validate(value, "back")
+
+    def test_rejects_invisible_and_direction_controls(self):
+        for c in ("\u202e", "\u2066", "\u200b", "\ufeff", "\u2028", "\u2029", "\x85", "\ue000"):
+            with self.assertRaises(ValueError):
+                validate(f"Deck{c}x", "back")
+        validate("漢字（かんじ）", "tab\tand\nnewline")
+
+    def test_card_text_cannot_imitate_dialog_labels(self):
+        spoof = "x\n\nAdd one note to deck \u201cOther\u201d?\nFRONT\nBACK (HTML source)\n" + "W" * 90
+        note = self.preview()["note"]
+        note["fields"] = {"Front": spoof, "Back": "日本語" * 40}
+        lines = approval_text(note).split("\n")
+        trusted = lines[:2] + ["", "FRONT", "BACK (HTML source)"]
+        self.assertIn(DECK, lines[0])
+        for line in lines[2:]:
+            self.assertTrue(line in trusted or line.startswith(("\u2502 ", "\u2506 ")), line)
+        # Card text appears only after its marker; the header is never repeated unmarked.
+        self.assertEqual(sum(l.startswith("Add one note") for l in lines), 1)
+        with patch("anki_mcp.subprocess.run") as run:
+            run.return_value.returncode, run.return_value.stdout = 0, "Add card"
+            self.assertTrue(confirm_on_mac(note))
+            argv = run.call_args.args[0]
+            self.assertIn(DECK, argv[-1])  # title, out of reach of card text
+            self.assertNotIn(spoof, argv[2])  # the script itself never contains card text
+
+    def test_previews_continue_while_dialog_is_open(self):
+        token = self.preview()["preview_id"]
+        opened, release = threading.Event(), threading.Event()
+        def slow_confirm(note):
+            opened.set()
+            release.wait(5)
+            return False
+        self.confirm.side_effect = slow_confirm
+        adder = threading.Thread(target=self.cards.add_card, args=(token,))
+        adder.start()
+        self.assertTrue(opened.wait(5))
+        done = threading.Event()
+        threading.Thread(target=lambda: (self.preview(), done.set())).start()
+        self.assertTrue(done.wait(2), "preview blocked by the open dialog")
+        # The token being confirmed is already consumed while its dialog is open.
+        self.assertNotIn(token, self.cards.pending)
+        release.set()
+        adder.join(5)
+        self.assertNotIn("addNote", [a for a, _ in self.calls])
+        with self.assertRaises(ValueError):  # still single-use after the cancel
+            self.cards.add_card(token)
 
     def test_dialog_fails_closed(self):
         note = self.preview()["note"]
