@@ -3,6 +3,7 @@ import argparse
 import copy
 import json
 import os
+import re
 import secrets
 import subprocess
 import threading
@@ -107,19 +108,26 @@ def validate(front, back):
 
 
 CONTENT_MARK = "\u2502 "     # starts each line of card text; labels never do
-CONTINUED_MARK = "\u2506 "   # starts a line we wrapped ourselves
+CONTINUED_MARK = "\u21b3 "   # starts a line we wrapped ourselves
 WRAP_COLUMNS = 40            # wide (CJK) characters count as two columns
+# Display-only line breaks after block-level tags, so each item reads on its own line.
+BREAK_AFTER = re.compile(r"(<br\s*/?>|</li>|<ul>|<ol>|</ul>|</ol>|</p>|</div>)", re.IGNORECASE)
+
+
+def width_of(text):
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in text)
 
 
 def wrap(line, width=WRAP_COLUMNS):
-    """Hard-wrap so the dialog never wraps a line onto the unmarked margin."""
+    """Hard-wrap so the dialog never wraps a line onto the unmarked margin.
+    Tags are kept whole so the HTML source stays readable."""
     pieces, current, used = [], "", 0
-    for c in line.replace("\t", "    "):
-        w = 2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
-        if used + w > width:
+    for token in re.findall(r"<[^<>]*>|.", line.replace("\t", "    "), re.DOTALL):
+        w = width_of(token)
+        if current and used + w > width:
             pieces.append(current)
             current, used = "", 0
-        current += c
+        current += token
         used += w
     return pieces + [current]
 
@@ -127,8 +135,10 @@ def wrap(line, width=WRAP_COLUMNS):
 def quoted(text):
     out = []
     for line in text.split("\n"):
-        first, *rest = wrap(line)
-        out += [CONTENT_MARK + first] + [CONTINUED_MARK + piece for piece in rest]
+        # Control characters are rejected by validate(), so NUL is a safe separator.
+        for part in BREAK_AFTER.sub("\\1\0", line).rstrip("\0").split("\0"):
+            first, *rest = wrap(part)
+            out += [CONTENT_MARK + first] + [CONTINUED_MARK + piece for piece in rest]
     return "\n".join(out)
 
 
@@ -137,8 +147,8 @@ def approval_text(note):
     so card content cannot pass itself off as a label or as the destination."""
     return (f"Add one note to deck \u201c{note['deckName']}\u201d "
             f"(note type \u201c{note['modelName']}\u201d)?\n"
-            "Lines marked \u2502 are card text supplied by the AI "
-            "(\u2506 = wrapped for display).\n\n"
+            "Lines marked \u2502 are card text supplied by the AI; "
+            "\u21b3 continues the line above.\n\n"
             f"FRONT\n{quoted(note['fields']['Front'])}\n\n"
             f"BACK (HTML source)\n{quoted(note['fields']['Back'])}")
 

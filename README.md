@@ -116,8 +116,10 @@ to Cancel and expires after 45 seconds. Never automate its approval. Only one
 dialog is open at a time; previews keep working while it is open.
 
 In the dialog, the deck appears in the window title and the first line. Every
-line of card text starts with `│` (or `┆` where the server wrapped a long line),
-so text from the AI cannot pass itself off as a label or a destination.
+line of card text starts with `│` (or `↳` where the server wrapped a long line),
+so text from the AI cannot pass itself off as a label or a destination. For
+readability, the dialog starts a new line after `<br>`, list and paragraph tags
+and never splits a tag; the card itself is unchanged.
 
 Duplicates use Anki's first-field/note-type rules across the collection, not
 semantic similarity. Anki's own add call also disallows duplicates. If a write

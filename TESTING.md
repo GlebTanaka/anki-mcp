@@ -72,9 +72,19 @@ key redaction, and refusing additions without a desktop session. A real
 Keychain round trip used a throwaway item that was then deleted. The applet's
 path handling was run headlessly.
 
-## Review fixes — offline, live check pending
+## Review fixes — live check 2026-11-23
 
-34 unit tests pass. New tests cover: a folder named like a tunnel ID, exact
+Run from a separate worktree with the real tunnel client and ChatGPT plugin.
+User-reported: the new approval dialog showed the deck in its title and marked
+every card line; Cancel added nothing; Add card added the note; `status` and a
+refused second `start` behaved as expected. A user-supplied copy of the dialog
+text confirmed no card line reached the label margin. After that check, the
+display was changed to break after block-level tags and never split a tag;
+that layout change is covered offline, not yet seen live.
+
+### Offline coverage
+
+35 unit tests pass. New tests cover: a folder named like a tunnel ID, exact
 argument reading for paths with spaces and Unicode, failure to inspect
 processes, a second checkout blocked by the shared lock with a blind process
 scan, lock release when the client is killed, the lock surviving `exec` as in
@@ -82,7 +92,7 @@ scan, lock release when the client is killed, the lock surviving `exec` as in
 characters, dialog text that imitates labels, and previews while a dialog is
 open. The argument reader correctly identified a real running client's tunnel
 from its configuration. The changed dialog script compiles; the dialog itself
-and the lock with the real tunnel client still need a live run.
+and the lock with the real tunnel client were then checked live (above).
 
 ## Limitations
 

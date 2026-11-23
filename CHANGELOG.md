@@ -11,7 +11,9 @@
   invisible or direction-changing characters are rejected. The approval
   dialog marks every line of card text and shows the deck in its title.
 - Previews no longer wait while an approval dialog is open; additions remain
-  one at a time, single-use and rechecked. 34 tests pass (7 new).
+  one at a time, single-use and rechecked. The dialog starts a new line
+  after block-level tags and never splits a tag. 35 tests pass (8 new);
+  the lock and dialog passed a live check with ChatGPT.
 
 - Added `tunnelctl.py`: background Start/Stop, runtime key in the macOS
   Keychain, `/readyz` readiness and status, a lock plus process scan that

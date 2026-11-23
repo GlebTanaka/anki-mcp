@@ -130,7 +130,7 @@ class CardTests(unittest.TestCase):
         trusted = lines[:2] + ["", "FRONT", "BACK (HTML source)"]
         self.assertIn(DECK, lines[0])
         for line in lines[2:]:
-            self.assertTrue(line in trusted or line.startswith(("\u2502 ", "\u2506 ")), line)
+            self.assertTrue(line in trusted or line.startswith(("\u2502 ", "\u21b3 ")), line)
         # Card text appears only after its marker; the header is never repeated unmarked.
         self.assertEqual(sum(l.startswith("Add one note") for l in lines), 1)
         with patch("anki_mcp.subprocess.run") as run:
@@ -139,6 +139,22 @@ class CardTests(unittest.TestCase):
             argv = run.call_args.args[0]
             self.assertIn(DECK, argv[-1])  # title, out of reach of card text
             self.assertNotIn(spoof, argv[2])  # the script itself never contains card text
+
+    def test_dialog_breaks_at_block_tags_and_never_splits_tags(self):
+        import re
+        note = self.preview()["note"]
+        back = ("<b>読み：</b><br>" + "寄り道したので帰りが遅くなった。" * 3
+                + "<ul><li>" + "x" * 37 + "<b>y</b></li></ul>")
+        note["fields"] = {"Front": "front", "Back": back}
+        lines = approval_text(note).split("\n")
+        body = lines[lines.index("BACK (HTML source)") + 1:]
+        self.assertEqual(body[0], "\u2502 <b>読み：</b><br>")
+        self.assertIn("\u2502 </ul>", body)
+        for line in body:
+            text = line[2:]
+            self.assertFalse(re.search(r"<[^>]*$|^[^<]*>", text), f"tag split: {line}")
+        # Reassembling the display gives back exactly the card text.
+        self.assertEqual("".join(l[2:] for l in body), back)
 
     def test_previews_continue_while_dialog_is_open(self):
         token = self.preview()["preview_id"]
