@@ -94,6 +94,14 @@ open. The argument reader correctly identified a real running client's tunnel
 from its configuration. The changed dialog script compiles; the dialog itself
 and the lock with the real tunnel client were then checked live (above).
 
+## Second review round — offline
+
+38 unit tests pass. New tests cover a relative `--config` resolved against the
+client's directory rather than the inspector's, reading another process's
+working directory, padded or multi-line tags, and a display-width cap for long
+text spans. Each new test failed against the previous code. Not yet seen in a
+live dialog; no change to the tunnel lifecycle.
+
 ## Limitations
 
 This is a prototype, not a claim of universal compatibility. The fresh install

@@ -214,9 +214,24 @@ def config_tunnel_id(text):
     return None
 
 
-def client_tunnel(argv):
+def process_cwd(pid):
+    """Working directory of another process via lsof, or None if unknown."""
+    try:
+        result = subprocess.run(['/usr/sbin/lsof', '-a', '-p', str(pid), '-d', 'cwd', '-Fn'],
+                                capture_output=True, text=True, encoding='utf-8',
+                                errors='replace', env=PS_ENV, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    names = [line[1:] for line in result.stdout.splitlines() if line.startswith('n')]
+    return Path(names[0]) if result.returncode == 0 and len(names) == 1 \
+        and names[0].startswith('/') else None
+
+
+def client_tunnel(argv, cwd=lambda: None):
     """For a `tunnel-client run` argv: (True, tunnel ID or None if unknown).
-    For anything else: (False, None)."""
+    For anything else: (False, None). `cwd` returns the client's working
+    directory (or None); a relative --config is resolved against it, never
+    against ours, and is unknown when it cannot be determined."""
     for i in (0, 1):  # direct executable, or an interpreter running it
         if (len(argv) > i + 1 and os.path.basename(argv[i]) == 'tunnel-client'
                 and argv[i + 1] == 'run'):
@@ -230,16 +245,24 @@ def client_tunnel(argv):
     config = flag_value(args, '--config')
     if config is None:
         return True, None  # configured by environment: cannot tell
+    path = Path(config)
+    if not path.is_absolute():
+        base = cwd()
+        if base is None:
+            return True, None
+        path = base / path
     try:
-        return True, config_tunnel_id(Path(config).read_text(errors='replace'))
+        return True, config_tunnel_id(path.read_text(errors='replace'))
     except OSError:
         return True, None
 
 
 class Tunnel:
     def __init__(self, root, keychain=None, processes=list_processes, inspect=inspect_pid,
-                 is_gui=gui_session, ready_timeout=45, stop_timeout=10, lock_dir=LOCK_DIR):
+                 is_gui=gui_session, ready_timeout=45, stop_timeout=10, lock_dir=LOCK_DIR,
+                 cwd_of=process_cwd):
         self.root = Path(root)
+        self.cwd_of = cwd_of
         self.lock_dir = Path(lock_dir)
         self.keychain = keychain or Keychain()
         self.processes, self.inspect, self.is_gui = processes, inspect, is_gui
@@ -357,7 +380,7 @@ class Tunnel:
             if argv is None:
                 found.append((pid, 'unreadable process'))
                 continue
-            is_client, their_id = client_tunnel(argv)
+            is_client, their_id = client_tunnel(argv, lambda pid=pid: self.cwd_of(pid))
             if not is_client:
                 continue
             if their_id is None:

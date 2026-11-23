@@ -126,7 +126,8 @@ semantic similarity. Anki's own add call also disallows duplicates. If a write
 times out, inspect Anki before retrying because the response may have been lost.
 
 Simple formatting and ruby HTML are allowed, without attributes, scripts,
-images, sound directives, comments, processing instructions or CDATA. Invisible
+images, sound directives, comments, processing instructions or CDATA. Tags
+must be written plainly (`<b>`, `</b>`, `<br />`), without padding inside them. Invisible
 and direction-changing characters (bidi controls, zero-width marks, line
 separators) are rejected; this also rejects emoji built with zero-width joiners.
 Each field is limited to 1500 characters. The Mac
@@ -196,7 +197,8 @@ and refuses to start a second client for the same tunnel.
   inherits the lock, so it is held exactly as long as a client for that tunnel
   runs and is released automatically when the client exits or crashes. As a
   backstop for clients started some other way, the exact arguments of every
-  running `tunnel-client run` are read and its configuration parsed; one using
+  running `tunnel-client run` are read and its configuration parsed (a relative
+  `--config` is resolved against that client's own working directory); one using
   the same tunnel, or one that cannot be identified, blocks the start, and so
   does a failure to inspect processes. A state file records the PID and process
   start time so a reused PID is never signalled.

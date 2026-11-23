@@ -156,6 +156,23 @@ class CardTests(unittest.TestCase):
         # Reassembling the display gives back exactly the card text.
         self.assertEqual("".join(l[2:] for l in body), back)
 
+    def test_tags_must_be_plain(self):
+        for value in ("<b" + " " * 100 + ">x</b>", "<b\n>x</b>", "x</b   >", "<br  />"):
+            with self.assertRaises(ValueError):
+                validate(value, "back")
+        validate("<b>x</b><br><br/><br /><ruby>漢<rt>かん</rt></ruby>", "a < b and c > d")
+
+    def test_no_display_line_exceeds_the_wrap_width(self):
+        from anki_mcp import WRAP_COLUMNS, width_of
+        note = self.preview()["note"]
+        note["fields"] = {"Front": "a < " + "long text " * 20 + "> b",
+                          "Back": "<b>" + "語" * 30 + "</b>" + "x" * 100}
+        lines = approval_text(note).split("\n")
+        start = lines.index("FRONT")
+        for line in lines[start:]:
+            if line.startswith(("\u2502 ", "\u21b3 ")):
+                self.assertLessEqual(width_of(line[2:]), WRAP_COLUMNS, line)
+
     def test_previews_continue_while_dialog_is_open(self):
         token = self.preview()["preview_id"]
         opened, release = threading.Event(), threading.Event()

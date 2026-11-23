@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Second review round: a relative `--config` of a running client is resolved
+  against that client's working directory (via `lsof`) and treated as unknown
+  when that cannot be read. HTML tags must be written plainly, and the dialog
+  splits any over-long span so no displayed line exceeds 40 columns. 38 tests
+  pass (3 new, each confirmed to fail on the previous code).
+
 - Addressed review findings. Duplicate prevention now uses one per-user,
   per-tunnel lock shared by all checkouts and both launchers and held by the
   running client itself. The process scan reads exact arguments, parses the

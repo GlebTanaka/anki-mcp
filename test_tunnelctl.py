@@ -143,6 +143,28 @@ class ProcessTests(unittest.TestCase):
             for text in ('tunnel_id: env:X', 'a:\n  tunnel_id: tunnel_a\nb:\n  tunnel_id: tunnel_b'):
                 self.assertIsNone(tunnelctl.config_tunnel_id(text))
 
+    def test_relative_config_uses_the_clients_directory(self):
+        with tempfile.TemporaryDirectory() as folder:
+            theirs, ours = Path(folder) / 'theirs', Path(folder) / 'ours'
+            for d, tid in ((theirs, TUNNEL), (ours, 'tunnel_other')):
+                d.mkdir()
+                (d / 'profile.json').write_text(json.dumps({'control_plane': {'tunnel_id': tid}}))
+            argv = ['/x/tunnel-client', 'run', '--config', 'profile.json']
+            old = os.getcwd()
+            os.chdir(ours)  # the inspecting process's directory must not matter
+            try:
+                self.assertEqual(client_tunnel(argv, lambda: theirs), (True, TUNNEL))
+                self.assertEqual(client_tunnel(argv, lambda: None), (True, None))
+                self.assertEqual(client_tunnel(argv), (True, None))
+            finally:
+                os.chdir(old)
+            child = subprocess.Popen(['/bin/sleep', '30'], cwd=theirs)
+            try:
+                self.assertEqual(tunnelctl.process_cwd(child.pid), theirs.resolve())
+            finally:
+                child.kill()
+                child.wait()
+
     def test_other_clients_fails_closed(self):
         with tempfile.TemporaryDirectory() as folder:
             other = Path(folder) / 'other.yaml'

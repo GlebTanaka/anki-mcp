@@ -102,6 +102,11 @@ def validate(front, back):
         if any(unicodedata.category(c) in ("Cf", "Zl", "Zp", "Co", "Cn")
                or (unicodedata.category(c) == "Cc" and c not in "\n\t") for c in value):
             raise ValueError("Invisible or direction-changing characters are not supported")
+        # Tags must be written plainly (<b>, </b>, <br />): no padding or line
+        # breaks inside a tag, which could also stretch the approval dialog.
+        for tag in re.findall(r"<[/a-zA-Z][^<>]*>", value):
+            if not re.fullmatch(r"</?[a-zA-Z]+(?: ?/)?>", tag):
+                raise ValueError("Write HTML tags plainly, like <b>, </b> or <br>")
         parser = SafeHTML()
         parser.feed(value)
         parser.close()
@@ -122,7 +127,12 @@ def wrap(line, width=WRAP_COLUMNS):
     """Hard-wrap so the dialog never wraps a line onto the unmarked margin.
     Tags are kept whole so the HTML source stays readable."""
     pieces, current, used = [], "", 0
+    tokens = []
     for token in re.findall(r"<[^<>]*>|.", line.replace("\t", "    "), re.DOTALL):
+        # Anything wider than a line (e.g. "a < long text > b") is split up,
+        # so no displayed line can exceed the limit and wrap unmarked.
+        tokens += list(token) if width_of(token) > width else [token]
+    for token in tokens:
         w = width_of(token)
         if current and used + w > width:
             pieces.append(current)
